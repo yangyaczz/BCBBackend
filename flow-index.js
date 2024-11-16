@@ -4,9 +4,9 @@ const TokenTransferSync = require('./utils/TokenTransferSync');
 const config = {
     mode: 'flow',
     startBlock: 16176856,
-    tokenAddress: '0x2EC5CfDE6F37029aa8cc018ED71CF4Ef67C704AE',
+    tokenAddress: '0x7BAF75d206CA49B3454E1E54D9d563ff80f7492D',
     tokenSymbol: 'USDC',
-    toAddress: '0x7BAF75d206CA49B3454E1E54D9d563ff80f7492D',
+    toAddress: '0xBEbAF2a9ad714fEb9Dd151d81Dd6d61Ae0535646',
     rpc: {
         main: 'https://testnet.evm.nodes.onflow.org',
         backups: [

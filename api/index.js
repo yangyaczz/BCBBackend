@@ -250,6 +250,7 @@ app.get('/api/lottery/transfer', async (req, res) => {
              AND value = ? 
              AND to_address = ? 
              AND token_address = ?
+             AND status = 'pending'
              ORDER BY block_number DESC`,
             [mode, value, toAddress.toLowerCase(), tokenAddress.toLowerCase()]
         );
