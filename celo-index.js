@@ -1,16 +1,18 @@
+// https://alfajores-forno.celo-testnet.org
+
+
 const TokenTransferSync = require('./utils/TokenTransferSync');
 
 // 配置参数
 const config = {
-    mode: 'base',
-    startBlock: 17967960,
-    tokenAddress: '0x042c946A08f313f0996C35C96A4fe1bb24EeA44D',
+    mode: 'celo',
+    startBlock: 30787459,
+    tokenAddress: '0x2EC5CfDE6F37029aa8cc018ED71CF4Ef67C704AE',
+    tokenSymbol: 'USDC',
     toAddress: '0xbebaf2a9ad714feb9dd151d81dd6d61ae0535646',
     rpc: {
-        main: 'https://sepolia.base.org',
+        main: 'https://alfajores-forno.celo-testnet.org',
         backups: [
-            'https://1rpc.io/base-sepolia',
-            'https://base-sepolia.blockpi.network/v1/rpc/public'
         ]
     },
     sync: {

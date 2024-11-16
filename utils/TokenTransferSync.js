@@ -3,10 +3,11 @@ const { ethers } = require('ethers');
 require('dotenv').config();
 
 class TokenTransferSync {
-  constructor(mode, startBlock, tokenAddress, toAddress, rpcUrl, backupRpcUrls = [], options = {}) {
+  constructor(mode, startBlock, tokenAddress, tokenSymbol, toAddress, rpcUrl, backupRpcUrls = [], options = {}) {
     this.mode = mode;
     this.startBlock = startBlock;
     this.tokenAddress = tokenAddress;
+    this.tokenSymbol = tokenSymbol;
     this.toAddress = toAddress.toLowerCase();
     this.rpcUrl = rpcUrl;
     this.backupRpcUrls = backupRpcUrls || [];
@@ -16,6 +17,9 @@ class TokenTransferSync {
     this.maxRetries = options.maxRetries || 3;       // 最大重试次数
     this.retryDelay = options.retryDelay || 1000;    // 重试延迟
     this.pollInterval = options.pollInterval || 3000; // 轮询间隔，默认3秒
+
+    this.batchSize = options.maxBatchSize || 1000;
+    this.batchDelay = options.batchDelay || 500;
 
     this.isPolling = false; // 轮询状态标志
 
@@ -69,6 +73,8 @@ class TokenTransferSync {
         transaction_hash VARCHAR(66) NOT NULL,
         from_address VARCHAR(42) NOT NULL,
         to_address VARCHAR(42) NOT NULL,
+        token_address VARCHAR(42) NOT NULL,
+        token_symbol VARCHAR(10) NOT NULL,
         value VARCHAR(78) NOT NULL,
         timestamp BIGINT NOT NULL,
         status VARCHAR(20) NOT NULL DEFAULT 'pending',
@@ -80,6 +86,7 @@ class TokenTransferSync {
         INDEX idx_block_number (block_number),
         INDEX idx_from_address (from_address),
         INDEX idx_to_address (to_address),
+        INDEX idx_token_address (token_address),
         INDEX idx_status (status),
         INDEX idx_timestamp (timestamp),
         INDEX idx_lottery_period (lottery_period)
@@ -193,6 +200,8 @@ class TokenTransferSync {
     }
   }
 
+
+
   async syncTransfersBatch(fromBlock, toBlock) {
     const contract = this.getTokenContract();
 
@@ -213,15 +222,18 @@ class TokenTransferSync {
             event.transactionHash,
             event.args[0],                  // from_address
             this.toAddress,                 // to_address
+            this.tokenAddress,              // token_address
+            this.tokenSymbol,              // token_symbol
             event.args[2].toString(),       // value
             block.timestamp,
-            this.STATUS.PENDING            //   pending
+            this.STATUS.PENDING            // status
           ];
         }));
 
         const insertSQL = `
           INSERT INTO ethglobal_token_transfers 
-          (mode, block_number, transaction_hash, from_address, to_address, value, timestamp, status)
+          (mode, block_number, transaction_hash, from_address, to_address, 
+           token_address, token_symbol, value, timestamp, status)
           VALUES ?
         `;
 
@@ -237,6 +249,8 @@ class TokenTransferSync {
       throw error;
     }
   }
+
+
 
   async updateTransferStatus(transactionHash, status, details = null) {
     try {
