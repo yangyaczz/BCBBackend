@@ -15,6 +15,8 @@ async function a() {
     });
 
     const data = await response.json();
+
+    console.log(data)
 }
 
 a()

@@ -189,8 +189,13 @@ async function createNotaryAttestation(itemName, itemQuantity, itemPrice, tokenA
         indexingValue: purchaser
     });
 
+
+
     console.log('attestation result:', res)
     console.log(`https://testnet-scan.sign.global/attestation/onchain_evm_84532_${res.attestationId}`)
+
+    return res
+
 }
 
 
