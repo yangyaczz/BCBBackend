@@ -14,7 +14,7 @@ app.use(cors({
 }));
 
 // 添加 OPTIONS 请求处理
-app.options('*', cors());
+// app.options('*', cors());
 
 // Enable JSON parsing
 app.use(express.json());
@@ -204,6 +204,96 @@ app.get('/api/lottery/info', async (req, res) => {
     }
 });
 
+
+// 验证中间件
+const validateTransferRequest = [
+    body('mode').isString().trim().notEmpty(),
+    body('value').isString().trim().notEmpty(),
+    body('toAddress').isString().trim()
+        .matches(/^0x[a-fA-F0-9]{40}$/i)
+        .customSanitizer(value => value.toLowerCase()),
+    body('tokenAddress').isString().trim()
+        .matches(/^0x[a-fA-F0-9]{40}$/i)
+        .customSanitizer(value => value.toLowerCase()),
+];
+
+
+// 新增的 transfer 端点
+app.get('/api/lottery/transfer', async (req, res) => {
+    try {
+        const {
+            mode,
+            value,
+            toAddress,
+            tokenAddress
+        } = req.query;
+
+        // 确保所需参数都存在
+        if (!mode || !value || !toAddress || !tokenAddress) {
+            return res.status(400).json({
+                success: false,
+                message: 'Missing required parameters',
+                required: ['mode', 'value', 'toAddress', 'tokenAddress']
+            });
+        }
+
+        // 确保数据库连接
+        if (!tokenSync.connection || tokenSync.connection.state === 'disconnected') {
+            await tokenSync.connectDB();
+        }
+
+        // 查询数据库中的转账记录
+        const [transfers] = await tokenSync.connection.execute(
+            `SELECT * FROM ethglobal_token_transfers 
+             WHERE mode = ? 
+             AND value = ? 
+             AND to_address = ? 
+             AND token_address = ?
+             ORDER BY block_number DESC`,
+            [mode, value, toAddress.toLowerCase(), tokenAddress.toLowerCase()]
+        );
+
+        if (!transfers || transfers.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'No matching transfers found'
+            });
+        }
+
+        // 返回查询结果
+        res.json({
+            success: true,
+            message: 'Transfers retrieved successfully',
+            data: transfers.map(transfer => ({
+                transactionHash: transfer.transaction_hash,
+                blockNumber: transfer.block_number,
+                fromAddress: transfer.from_address,
+                toAddress: transfer.to_address,
+                value: transfer.value,
+                timestamp: transfer.timestamp,
+                status: transfer.status,
+                lotteryNumber: transfer.lottery_numbers,
+                lotteryPeriod: transfer.lottery_period
+            }))
+        });
+
+    } catch (error) {
+        console.error('Error fetching transfers:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error',
+            error: error.message
+        });
+    }
+});
+
+// 添加健康检查端点
+app.get('/health', (req, res) => {
+    res.json({ status: 'ok' });
+});
+
+
+
 // 添加根路径处理
 app.get('/', (req, res) => {
     res.json({
@@ -230,16 +320,23 @@ app.get('/', (req, res) => {
                 params: {
                     transactionHash: "string (query parameter)"
                 }
-            }
+            },
+            transfer: {
+                method: "GET",
+                path: "/api/lottery/transfer",
+                description: "Get transfers by specified parameters",
+                params: {
+                    mode: "string (query parameter)",
+                    value: "string (query parameter)",
+                    toAddress: "address (query parameter)",
+                    tokenAddress: "address (query parameter)"
+                }
+            },
         },
         status: "active"
     });
 });
 
-// 添加健康检查端点
-app.get('/health', (req, res) => {
-    res.json({ status: 'ok' });
-});
 
 // 添加 404 处理
 app.use((req, res) => {
