@@ -31,9 +31,15 @@ class TokenTransferSync {
       password: process.env.DB_PASSWORD,
       database: process.env.DB_DATABASE
     };
+
+    this.STATUS = {
+      PENDING: 'pending',           // 初始状态，等待分配彩票号码
+      NUMBERS_ASSIGNED: 'assigned', // 已分配彩票号码
+      CLAIMED: 'claimed',          // 已领取奖励
+      FAILED: 'failed'             // 处理失败
+    };
   }
 
-  // ... 其他基础方法保持不变 ...
 
   initializeProvider() {
     this.provider = new ethers.JsonRpcProvider(this.rpcUrl);
@@ -62,13 +68,21 @@ class TokenTransferSync {
         block_number BIGINT NOT NULL,
         transaction_hash VARCHAR(66) NOT NULL,
         from_address VARCHAR(42) NOT NULL,
+        to_address VARCHAR(42) NOT NULL,
         value VARCHAR(78) NOT NULL,
         timestamp BIGINT NOT NULL,
+        status VARCHAR(20) NOT NULL DEFAULT 'pending',
+        lottery_numbers VARCHAR(100) DEFAULT NULL,
+        lottery_period BIGINT DEFAULT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         INDEX idx_mode (mode),
         INDEX idx_block_number (block_number),
         INDEX idx_from_address (from_address),
-        INDEX idx_timestamp (timestamp)
+        INDEX idx_to_address (to_address),
+        INDEX idx_status (status),
+        INDEX idx_timestamp (timestamp),
+        INDEX idx_lottery_period (lottery_period)
       )
     `;
 
@@ -197,15 +211,17 @@ class TokenTransferSync {
             this.mode,
             event.blockNumber,
             event.transactionHash,
-            event.args[0],
-            event.args[2].toString(),
-            block.timestamp
+            event.args[0],                  // from_address
+            this.toAddress,                 // to_address
+            event.args[2].toString(),       // value
+            block.timestamp,
+            this.STATUS.PENDING            //   pending
           ];
         }));
 
         const insertSQL = `
           INSERT INTO ethglobal_token_transfers 
-          (mode, block_number, transaction_hash, from_address, value, timestamp)
+          (mode, block_number, transaction_hash, from_address, to_address, value, timestamp, status)
           VALUES ?
         `;
 
@@ -218,6 +234,28 @@ class TokenTransferSync {
       return toBlock;
     } catch (error) {
       console.error(`Failed to sync blocks ${fromBlock}-${toBlock}:`, error);
+      throw error;
+    }
+  }
+
+  async updateTransferStatus(transactionHash, status, details = null) {
+    try {
+      const updateSQL = `
+        UPDATE ethglobal_token_transfers 
+        SET status = ?, 
+            updated_at = CURRENT_TIMESTAMP
+        WHERE transaction_hash = ?
+      `;
+
+      const [result] = await this.connection.execute(updateSQL, [status, transactionHash]);
+      if (result.affectedRows === 0) {
+        console.warn(`No transfer found with hash ${transactionHash}`);
+      } else {
+        console.log(`Updated status of transfer ${transactionHash} to ${status}`);
+      }
+      return result.affectedRows > 0;
+    } catch (error) {
+      console.error(`Failed to update transfer status:`, error);
       throw error;
     }
   }
@@ -335,6 +373,146 @@ class TokenTransferSync {
       await this.connection.end();
     }
   }
+
+
+  // lottery
+  // 更新彩票号码、期号和状态
+  async assignLotteryNumbers(transactionHash, lotteryNumbers, lotteryPeriod) {
+    try {
+      const updateSQL = `
+        UPDATE ethglobal_token_transfers 
+        SET lottery_numbers = ?,
+            lottery_period = ?,
+            status = ?,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE transaction_hash = ?
+          AND status = ?
+      `;
+
+      const [result] = await this.connection.execute(updateSQL, [
+        lotteryNumbers,
+        lotteryPeriod,
+        this.STATUS.NUMBERS_ASSIGNED,
+        transactionHash,
+        this.STATUS.PENDING
+      ]);
+
+      if (result.affectedRows === 0) {
+        console.warn(`No pending transfer found with hash ${transactionHash}`);
+      } else {
+        console.log(`Assigned lottery numbers ${lotteryNumbers} for period ${lotteryPeriod} to transfer ${transactionHash}`);
+      }
+      return result.affectedRows > 0;
+    } catch (error) {
+      console.error(`Failed to assign lottery numbers:`, error);
+      throw error;
+    }
+  }
+
+  // 获取特定期号的所有转账
+  async getTransfersByPeriod(period, status = null, limit = 100) {
+    try {
+      let sql = `
+        SELECT * FROM ethglobal_token_transfers 
+        WHERE lottery_period = ?
+      `;
+      const params = [period];
+
+      if (status) {
+        sql += ` AND status = ?`;
+        params.push(status);
+      }
+
+      sql += ` ORDER BY block_number ASC LIMIT ?`;
+      params.push(limit);
+
+      const [rows] = await this.connection.execute(sql, params);
+      return rows;
+    } catch (error) {
+      console.error(`Failed to get transfers for period ${period}:`, error);
+      throw error;
+    }
+  }
+
+  // 获取某用户在特定期号的彩票号码
+  async getUserLotteryNumbersByPeriod(userAddress, period) {
+    try {
+      const [rows] = await this.connection.execute(
+        `SELECT transaction_hash, lottery_numbers, created_at 
+         FROM ethglobal_token_transfers 
+         WHERE from_address = ? 
+         AND lottery_period = ?
+         AND status = ?
+         ORDER BY block_number DESC`,
+        [userAddress.toLowerCase(), period, this.STATUS.NUMBERS_ASSIGNED]
+      );
+      return rows;
+    } catch (error) {
+      console.error('Failed to get user lottery numbers for period:', error);
+      throw error;
+    }
+  }
+
+  // 获取最新的彩票期号
+  async getLatestLotteryPeriod() {
+    try {
+      const [rows] = await this.connection.execute(
+        `SELECT MAX(lottery_period) as latest_period 
+         FROM ethglobal_token_transfers 
+         WHERE lottery_period IS NOT NULL`
+      );
+      return rows[0].latest_period || 0;
+    } catch (error) {
+      console.error('Failed to get latest lottery period:', error);
+      throw error;
+    }
+  }
+
+  // 获取特定期号的统计信息
+  async getPeriodStatistics(period) {
+    try {
+      const [rows] = await this.connection.execute(
+        `SELECT 
+           status,
+           COUNT(*) as count,
+           SUM(CAST(value AS DECIMAL(65,0))) as total_value
+         FROM ethglobal_token_transfers 
+         WHERE lottery_period = ?
+         GROUP BY status`,
+        [period]
+      );
+      return rows;
+    } catch (error) {
+      console.error(`Failed to get statistics for period ${period}:`, error);
+      throw error;
+    }
+  }
+
+  // 批量更新特定期号的状态
+  async batchUpdatePeriodStatus(period, fromStatus, toStatus) {
+    try {
+      const updateSQL = `
+        UPDATE ethglobal_token_transfers 
+        SET status = ?,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE lottery_period = ?
+          AND status = ?
+      `;
+
+      const [result] = await this.connection.execute(updateSQL, [
+        toStatus,
+        period,
+        fromStatus
+      ]);
+
+      console.log(`Updated ${result.affectedRows} transfers for period ${period} from ${fromStatus} to ${toStatus}`);
+      return result.affectedRows;
+    } catch (error) {
+      console.error(`Failed to batch update period status:`, error);
+      throw error;
+    }
+  }
+
 
 
 
