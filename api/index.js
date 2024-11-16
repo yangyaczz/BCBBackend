@@ -4,6 +4,13 @@ const cors = require('cors');
 const { body, validationResult } = require('express-validator');
 const TokenTransferSync = require('../utils/TokenTransferSync');
 
+const { SignProtocolClient, SpMode, EvmChains } = require("@ethsign/sp-sdk");
+const { privateKeyToAccount } = require("viem/accounts");
+const { parseEther } = require('viem')
+
+require('dotenv').config();
+const privateKey = process.env.PRIVATE_KEY
+
 const app = express();
 
 // 启用 CORS
@@ -145,6 +152,115 @@ app.post('/api/lottery/assign', validateLotteryRequest, async (req, res) => {
 
     } catch (error) {
         console.error('Error processing lottery assignment:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error',
+            error: error.message
+        });
+    }
+});
+
+
+async function createNotaryAttestation(itemName, itemQuantity, itemPrice, tokenAddress, purchaser, lotteryNumber) {
+
+    const client = new SignProtocolClient(SpMode.OnChain, {
+        chain: EvmChains.baseSepolia,
+        account: privateKeyToAccount(privateKey),
+    });
+
+    const itemPricesInEth = itemPrice.map(price => parseEther(price.toString()));
+
+    const totalPrice = itemPricesInEth.reduce((sum, price, index) => {
+        return sum + (price * BigInt(itemQuantity[index]));
+    }, BigInt(0));
+
+    const res = await client.createAttestation({
+        schemaId: "0x4e4",
+        data: {
+            itemName: itemName,
+            itemQuantity: itemQuantity,
+            itemPrice: itemPricesInEth,
+            purchaseTimestamp: Math.floor(Date.now() / 1000).toString(),
+            tokenAddress: tokenAddress,
+            purchaser: purchaser,
+            totalPrice: totalPrice,
+            lotteryNumber: lotteryNumber
+        },
+        indexingValue: purchaser
+    });
+
+    console.log('attestation result:', res)
+    console.log(`https://testnet-scan.sign.global/attestation/onchain_evm_84532_${res.attestationId}`)
+}
+
+
+app.post('/api/notary/create', async (req, res) => {
+    try {
+        // 输入验证
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) {
+            return res.status(400).json({
+                success: false,
+                message: 'Validation error',
+                errors: errors.array().map(err => ({
+                    field: err.path,
+                    message: `${err.path} ${err.msg}`,
+                    value: err.value
+                }))
+            });
+        }
+
+        // 从请求体中获取参数
+        const {
+            itemName,         // 数组 ['cocoa', 'chicken']
+            itemQuantity,     // 数组 [2, 1]
+            itemPrice,        // 数组 [1, 2]
+            tokenAddress,     // string
+            purchaser,        // string
+            lotteryNumber    // 数组 [2, 1, 3]
+        } = req.body;
+
+        // 参数验证
+        if (!Array.isArray(itemName) || !Array.isArray(itemQuantity) ||
+            !Array.isArray(itemPrice) || !Array.isArray(lotteryNumber)) {
+            return res.status(400).json({
+                success: false,
+                message: 'itemName, itemQuantity, itemPrice, and lotteryNumber must be arrays'
+            });
+        }
+
+        if (itemName.length !== itemQuantity.length || itemQuantity.length !== itemPrice.length) {
+            return res.status(400).json({
+                success: false,
+                message: 'Arrays length mismatch'
+            });
+        }
+
+
+
+        // 调用 createNotaryAttestation
+        const result = await createNotaryAttestation(
+            itemName,
+            itemQuantity,
+            itemPrice,
+            tokenAddress,
+            purchaser,
+            lotteryNumber
+        );
+
+        // 返回成功响应
+        res.json({
+            success: true,
+            message: 'Notary attestation created successfully',
+            data: {
+                // attestationId: result.attestationId,
+                // transactionHash: result.txHash,
+                url: `https://testnet-scan.sign.global/attestation/onchain_evm_84532_${result.attestationId}`
+            }
+        });
+
+    } catch (error) {
+        console.error('Error creating notary attestation:', error);
         res.status(500).json({
             success: false,
             message: 'Internal server error',
@@ -330,7 +446,7 @@ app.get('/api/lottery/latest', async (req, res) => {
         }
 
         const transfer = transfers[0];
-        
+
         // 返回结果
         res.json({
             success: true,
@@ -411,6 +527,36 @@ app.get('/', (req, res) => {
                 params: {
                     mode: "string (query parameter)",
                     fromAddress: "address (query parameter)"
+                }
+            },
+            createNotary: {
+                method: "POST",
+                path: "/api/notary/create",
+                description: "Create a notary attestation for lottery purchases",
+                params: {
+                    itemName: "string[] (array of item names)",
+                    itemQuantity: "number[] (array of quantities)",
+                    itemPrice: "number[] (array of prices in ETH)",
+                    tokenAddress: "address (token contract address)",
+                    purchaser: "address (purchaser's address)",
+                    lotteryNumber: "number[] (array of lottery numbers)"
+                },
+                example: {
+                    itemName: ["cocoa", "chicken"],
+                    itemQuantity: [2, 1],
+                    itemPrice: [1, 2],
+                    tokenAddress: "0xA7ab21686D40Aa35Cb51137A795D84A57352F593",
+                    purchaser: "0xBEbAF2a9ad714fEb9Dd151d81Dd6d61Ae0535646",
+                    lotteryNumber: [2, 1, 3]
+                },
+                response: {
+                    success: true,
+                    message: "Notary attestation created successfully",
+                    data: {
+                        // attestationId: "string",
+                        // transactionHash: "string",
+                        url: "string (attestation URL)"
+                    }
                 }
             }
         },
