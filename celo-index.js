@@ -1,6 +1,5 @@
 // https://alfajores-forno.celo-testnet.org
 
-
 const TokenTransferSync = require('./utils/TokenTransferSync');
 
 // 配置参数
@@ -20,7 +19,7 @@ const config = {
         maxRetries: 3,
         retryDelay: 1000,
         batchDelay: 500,
-        pollInterval: 3000  // interval 3s
+        pollInterval: 5000  // interval 3s
     }
 };
 
@@ -29,14 +28,14 @@ const tokenSync = new TokenTransferSync(
     config.mode,
     config.startBlock,
     config.tokenAddress,
-    config.toAddress,
+    config.tokenSymbol,  
+    config.toAddress,     
     config.rpc.main,
     config.rpc.backups,
     {
-        batchSize: config.sync.batchSize,
+        maxBatchSize: config.sync.batchSize,  
         maxRetries: config.sync.maxRetries,
         retryDelay: config.sync.retryDelay,
-        batchDelay: config.sync.batchDelay,
         pollInterval: config.sync.pollInterval
     }
 );

@@ -85,7 +85,10 @@ app.post('/api/lottery/assign', validateLotteryRequest, async (req, res) => {
         }
 
         const {
+            mode,
             value,
+            toAddress,
+            tokenAddress,
             lotteryNumber,
             lotteryPeriod
         } = req.body;
@@ -105,7 +108,7 @@ app.post('/api/lottery/assign', validateLotteryRequest, async (req, res) => {
              AND lottery_numbers IS NULL
              ORDER BY block_number ASC
              LIMIT 1`,
-            [config.mode, value, config.toAddress.toLowerCase(), config.tokenAddress.toLowerCase(), tokenSync.STATUS.PENDING]
+            [mode, value, toAddress.toLowerCase(), tokenAddress.toLowerCase(), tokenSync.STATUS.PENDING]
         );
 
         if (!transfers || transfers.length === 0) {
@@ -167,10 +170,8 @@ app.get('/api/lottery/info', async (req, res) => {
 
         const [transfers] = await tokenSync.connection.execute(
             `SELECT * FROM ethglobal_token_transfers 
-             WHERE transaction_hash = ? 
-             AND mode = ? 
-             AND token_address = ?`,
-            [transactionHash, config.mode, config.tokenAddress.toLowerCase()]
+             WHERE transaction_hash = ?`,
+            [transactionHash]
         );
 
         if (!transfers || transfers.length === 0) {
@@ -287,6 +288,76 @@ app.get('/api/lottery/transfer', async (req, res) => {
     }
 });
 
+// 添加新的路由来获取最新分配的记录
+app.get('/api/lottery/latest', async (req, res) => {
+    try {
+        const {
+            mode,
+            fromAddress
+        } = req.query;
+
+        // 验证必需参数
+        if (!mode || !fromAddress) {
+            return res.status(400).json({
+                success: false,
+                message: 'Missing required parameters',
+                required: ['mode', 'fromAddress']
+            });
+        }
+
+        // 确保数据库连接
+        if (!tokenSync.connection || tokenSync.connection.state === 'disconnected') {
+            await tokenSync.connectDB();
+        }
+
+        // 查询最新的已分配记录
+        const [transfers] = await tokenSync.connection.execute(
+            `SELECT * FROM ethglobal_token_transfers 
+             WHERE mode = ? 
+             AND from_address = ?
+             AND status = 'ASSIGNED'
+             ORDER BY updated_at DESC
+             LIMIT 1`,
+            [mode, fromAddress.toLowerCase()]
+        );
+
+        if (!transfers || transfers.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'No matching assigned transfer found'
+            });
+        }
+
+        const transfer = transfers[0];
+        
+        // 返回结果
+        res.json({
+            success: true,
+            message: 'Latest assigned transfer retrieved successfully',
+            data: {
+                transactionHash: transfer.transaction_hash,
+                blockNumber: transfer.block_number,
+                fromAddress: transfer.from_address,
+                toAddress: transfer.to_address,
+                value: transfer.value,
+                timestamp: transfer.timestamp,
+                status: transfer.status,
+                lotteryNumber: transfer.lottery_numbers,
+                lotteryPeriod: transfer.lottery_period,
+                updatedAt: transfer.updated_at
+            }
+        });
+
+    } catch (error) {
+        console.error('Error fetching latest assigned transfer:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error',
+            error: error.message
+        });
+    }
+});
+
 // 添加健康检查端点
 app.get('/health', (req, res) => {
     res.json({ status: 'ok' });
@@ -332,6 +403,15 @@ app.get('/', (req, res) => {
                     tokenAddress: "address (query parameter)"
                 }
             },
+            latest: {
+                method: "GET",
+                path: "/api/lottery/latest",
+                description: "Get the latest assigned transfer for a specific address",
+                params: {
+                    mode: "string (query parameter)",
+                    fromAddress: "address (query parameter)"
+                }
+            }
         },
         status: "active"
     });

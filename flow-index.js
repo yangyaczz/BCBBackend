@@ -1,17 +1,15 @@
- const TokenTransferSync = require('./utils/TokenTransferSync');
+const TokenTransferSync = require('./utils/TokenTransferSync');
 
 // 配置参数
 const config = {
-    mode: 'base',
-    startBlock: 17987929,
-    tokenAddress: '0xA7ab21686D40Aa35Cb51137A795D84A57352F593',
+    mode: 'flow',
+    startBlock: 16176856,
+    tokenAddress: '0x2EC5CfDE6F37029aa8cc018ED71CF4Ef67C704AE',
     tokenSymbol: 'USDC',
-    toAddress: '0xbebaf2a9ad714feb9dd151d81dd6d61ae0535646',
+    toAddress: '0x7BAF75d206CA49B3454E1E54D9d563ff80f7492D',
     rpc: {
-        main: 'https://sepolia.base.org',
+        main: 'https://testnet.evm.nodes.onflow.org',
         backups: [
-            'https://1rpc.io/base-sepolia',
-            'https://base-sepolia.blockpi.network/v1/rpc/public'
         ]
     },
     sync: {

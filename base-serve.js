@@ -25,7 +25,7 @@ const config = {
         maxRetries: 3,
         retryDelay: 1000,
         batchDelay: 500,
-        pollInterval: 5000
+        pollInterval: 8000
     }
 };
 
